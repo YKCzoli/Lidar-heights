@@ -1,0 +1,159 @@
+brew install laslib
+
+#cd to your working directory where your .las file is stored
+#lasinfo will return your .las info...go ahead and take a peek
+#the argument lasinfo receives is the file name of your .las file
+lasinfo ARRA-CA_GoldenGate_2010_000832.las
+
+#convert your .las to a text file.
+#open the text file and you will see comma delimted x,y,z.
+las2txt -i ARRA-CA_GoldenGate_2010_000832.las -o lidar.txt
+
+#start postgres.
+lunchy start postgres
+
+#create new db
+createdb sanfran
+
+#enter db
+psql sanfran username
+
+#activate postgis extenstion (for spatial objects and functionality)
+CREATE EXTENSION postgis;
+
+#create a table to hold our lidar dataset
+#this creates the infrastructure to hold our data x,y,z data
+CREATE TABLE elev (x double precision, y double precision, z double precision);
+
+#add a geometry column. Postgis documentation suggestion to add geo column after table creation.
+SELECT AddGeometryColumn ('elev','the_geom',32610,'POINT',2);
+
+#copy the data from our text file to our database
+copy elev(x,y,z) FROM '/Users/yuriyczoli/Downloads/ARRA-CA_GoldenGate_2010_000832/lidar.txt' DELIMITERS ',';
+
+#update table elev with geometry from text function, using utm 10n SRID
+#the srid is important. For any of our spatial functions to return properly we must esnure a proper projection
+UPDATE elev SET the_geom = ST_GeomFromText('POINT(' || x || ' ' || y || ')',32610);
+
+#create a spatial index. This will speed up processing later on.
+CREATE INDEX elev_gix ON elev USING GIST (the_geom);
+
+#cd to location of your building footprint shapefile
+#create a sql file from our shapefile
+shp2pgsql -I -s 32610 Buildings_filtered_UTM10.shp buildings > buildings.sql
+
+#load the sql file into our database
+psql -d sanfran -f buildings.sql
+
+#i used this as a check to make sure my layers were overlapping (poor man's SRID check)
+#if it returns all the values from building then our features are located
+SELECT building FROM buildings a, elev b WHERE ST_contains(a.geom, b.the_geom);
+
+#add a height field
+ALTER TABLE buildings ADD COLUMN height double precision NULL;
+
+#update our buildings table to hold the average height recordings from points within our building polygons
+#this is a spatial join in postgis
+#gid is a unique identifier in our buildings layer
+UPDATE buildings SET height = avgheight FROM (
+SELECT y.gid, avg(x.z) As avgheight
+FROM elev x, buildings y
+WHERE ST_within(x.the_geom, y.geom) GROUP BY y.gid
+) t
+WHERE buildings.gid = t.gid;
+
+#duplicate our buildings table. This table will
+CREATE TABLE buildings2m AS SELECT * FROM buildings;
+
+#create a ringed buffer around our buildings2m table.
+#These will be used to establish ground height around our buildings for reference
+#We buffer our table by 1m, then by 2m, and cut out the difference.
+#This will give us a 'ring' around our building footprints.
+#imagine standing at the wall of a building, walking out two meters, and recording the elevation
+#of the ground at that point. This is how we establish ground heights to give our building heights reference.
+UPDATE buildings2m SET geom = buffer FROM (
+SELECT y.gid, st_multi(ST_DIFFERENCE(st_multi(ST_Buffer(y.geom, 2)), st_multi(ST_buffer(y.geom, 1)))) As buffer
+FROM buildings2m y
+WHERE y.gid > 0
+) t
+WHERE buildings2m.gid = t.gid;
+
+
+#update our rings to have minimum elevation values from lidar points overlaying our building rings
+#These will be a representation of the ground height
+#We take the minimum value in case there is an area of the ring had a car, tree, or person within it at the time of lidar reading.
+UPDATE buildings2m SET height = minheight FROM (
+SELECT y.gid, min(x.z) As minheight
+FROM elev x, buildings2m y
+WHERE ST_within(x.the_geom, y.geom) GROUP BY y.gid
+) t
+WHERE buildings2m.gid = t.gid;
+
+#add a groundheight field
+ALTER TABLE buildings ADD COLUMN gheight double precision NULL;
+
+#update our building ghieght with height derived from our ground level rings, based on gid
+#Since we copied our table earlier, the ids will line up our buildings with their respective rings.
+UPDATE buildings x SET gheight = y.height FROM buildings2m y WHERE x.gid = y.gid;
+
+#add a height field
+ALTER TABLE buildings ADD COLUMN bheight double precision NULL;
+
+#subtract height from gheight to get buildingheight(bheight)
+UPDATE buildings set bheight = (height - gheight);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####MIGHT BE USEFUL 1M BUFFER
+UPDATE buildings1m SET geom = buffer FROM (
+SELECT y.gid, st_multi(ST_Buffer(y.geom, 1)) As buffer
+FROM buildings1m y
+WHERE y.gid > 0
+) t
+WHERE buildings1m.gid = t.gid;
+
+#create a new table, will be buffering this one
+CREATE TABLE buildings1m AS SELECT * FROM buildings;
+
+UPDATE buildings1m SET geom = buffer FROM (
+SELECT y.gid, st_multi(ST_Buffer(y.geom, 1)) As buffer
+FROM buildings1m y
+WHERE y.gid > 0
+) t
+WHERE buildings1m.gid = t.gid;
+
+
+
+
+
+
+
+
+
+
+
+
+#tester for clipper
+SELECT area, st_intersection(a.geom, b.geom) as geom
+FROM buildings a, buildings2m b
+WHERE st_intersects(a.geom, b.geom);
+
+UPDATE buildings2m SET geom = diff FROM(
+SELECT a.gid, st_multi(st_intersection(a.geom, b.geom)) as diff
+    FROM buildings2m a, buildings b
+    WHERE st_intersects(a.geom, b.geom))
+    t
+    WHERE buildings2m.gid = t.gid;
