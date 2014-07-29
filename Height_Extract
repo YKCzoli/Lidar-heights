@@ -1,5 +1,3 @@
-brew install laslib
-
 #cd to your working directory where your .las file is stored
 #lasinfo will return your .las info...go ahead and take a peek
 #the argument lasinfo receives is the file name of your .las file
@@ -62,7 +60,7 @@ WHERE ST_within(x.the_geom, y.geom) GROUP BY y.gid
 ) t
 WHERE buildings.gid = t.gid;
 
-#duplicate our buildings table. This table will
+#duplicate our buildings table. This table will be turned into a buffer
 CREATE TABLE buildings2m AS SELECT * FROM buildings;
 
 #create a ringed buffer around our buildings2m table.
@@ -102,58 +100,5 @@ ALTER TABLE buildings ADD COLUMN bheight double precision NULL;
 #subtract height from gheight to get buildingheight(bheight)
 UPDATE buildings set bheight = (height - gheight);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-####MIGHT BE USEFUL 1M BUFFER
-UPDATE buildings1m SET geom = buffer FROM (
-SELECT y.gid, st_multi(ST_Buffer(y.geom, 1)) As buffer
-FROM buildings1m y
-WHERE y.gid > 0
-) t
-WHERE buildings1m.gid = t.gid;
-
-#create a new table, will be buffering this one
-CREATE TABLE buildings1m AS SELECT * FROM buildings;
-
-UPDATE buildings1m SET geom = buffer FROM (
-SELECT y.gid, st_multi(ST_Buffer(y.geom, 1)) As buffer
-FROM buildings1m y
-WHERE y.gid > 0
-) t
-WHERE buildings1m.gid = t.gid;
-
-
-
-
-
-
-
-
-
-
-
-
-#tester for clipper
-SELECT area, st_intersection(a.geom, b.geom) as geom
-FROM buildings a, buildings2m b
-WHERE st_intersects(a.geom, b.geom);
-
-UPDATE buildings2m SET geom = diff FROM(
-SELECT a.gid, st_multi(st_intersection(a.geom, b.geom)) as diff
-    FROM buildings2m a, buildings b
-    WHERE st_intersects(a.geom, b.geom))
-    t
-    WHERE buildings2m.gid = t.gid;
+#create a ne table from our original table, preparing for styling in TileMill
+CREATE TABLE buildings3d AS SELECT * FROM buildings ORDER by bheight;
