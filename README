@@ -1,0 +1,7 @@
+Steps for extracting building heights using a .las file and a shapefile of building footprints (OSM layer used).
+
+Libraries required:
+
+liblas
+postgres
+postgis
