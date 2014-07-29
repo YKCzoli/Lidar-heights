@@ -9,27 +9,27 @@ lasinfo ARRA-CA_GoldenGate_2010_000832.las
 #open the text file and you will see comma delimted x,y,z.
 las2txt -i ARRA-CA_GoldenGate_2010_000832.las -o lidar.txt
 
-#start postgres.
+#start postgres however you prefer
 lunchy start postgres
 
 #create new db
 createdb sanfran
 
 #enter db
-psql sanfran username
+psql sanfran
 
 #activate postgis extenstion (for spatial objects and functionality)
 CREATE EXTENSION postgis;
 
 #create a table to hold our lidar dataset
-#this creates the infrastructure to hold our data x,y,z data
+#this creates the infrastructure to hold our x,y,z data
 CREATE TABLE elev (x double precision, y double precision, z double precision);
 
 #add a geometry column. Postgis documentation suggestion to add geo column after table creation.
 SELECT AddGeometryColumn ('elev','the_geom',32610,'POINT',2);
 
 #copy the data from our text file to our database
-copy elev(x,y,z) FROM '/Users/yuriyczoli/Downloads/ARRA-CA_GoldenGate_2010_000832/lidar.txt' DELIMITERS ',';
+copy elev(x,y,z) FROM ‘~/Downloads/ARRA-CA_GoldenGate_2010_000832/lidar.txt' DELIMITERS ',';
 
 #update table elev with geometry from text function, using utm 10n SRID
 #the srid is important. For any of our spatial functions to return properly we must esnure a proper projection
@@ -70,7 +70,7 @@ CREATE TABLE buildings2m AS SELECT * FROM buildings;
 #We buffer our table by 1m, then by 2m, and cut out the difference.
 #This will give us a 'ring' around our building footprints.
 #imagine standing at the wall of a building, walking out two meters, and recording the elevation
-#of the ground at that point. This is how we establish ground heights to give our building heights reference.
+#of the ground at that point.
 UPDATE buildings2m SET geom = buffer FROM (
 SELECT y.gid, st_multi(ST_DIFFERENCE(st_multi(ST_Buffer(y.geom, 2)), st_multi(ST_buffer(y.geom, 1)))) As buffer
 FROM buildings2m y
