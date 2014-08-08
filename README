@@ -1,6 +1,6 @@
 Postgis command steps for extracting building heights using a .las file and a shapefile of building footprints.
 Lidar dataset retrieved from USGS earthexplorer (http://earthexplorer.usgs.gov)
-Building footprints retrieved from OpenStreetMap.
+Building footprints retrieved from OpenStreetMap.org.
 
 Libraries required:
 
